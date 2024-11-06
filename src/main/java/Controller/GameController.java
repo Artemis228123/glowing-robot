@@ -63,8 +63,9 @@ public class GameController {
         for (int i = 0; i < players.size(); i++) {
             int index = (currentIndex + i) % players.size();
             Player player = players.get(index);
-            view.displayPlayerHand(player);
-            if (view.getYesNoChoice("Do you want to sponsor this quest?")) {
+            view.clearScreen();
+            view.displayMessage("Player " + player.getId() + ", do you want to sponsor this quest?");
+            if (view.getYesNoChoice("")) {
                 return player;
             }
         }
@@ -107,7 +108,7 @@ public class GameController {
     private void resolveQuest(Quest quest) {
         Set<Player> activeParticipants = new HashSet<>();
 
-        // Get initial participants
+        // Initial participants
         for (Player player : game.getPlayers()) {
             if (player != quest.getSponsor() &&
                     view.getYesNoChoice(player.getId() + ", do you want to participate?")) {
@@ -118,39 +119,82 @@ public class GameController {
 
         // Resolve each stage
         List<Stage> stages = quest.getStages();
-        for (int i = 0; i < stages.size() && !activeParticipants.isEmpty(); i++) {
-            Stage stage = stages.get(i);
-            view.displayMessage("\nResolving Stage " + (i + 1));
+        for (int stageNum = 0; stageNum < stages.size() && !activeParticipants.isEmpty(); stageNum++) {
+            Stage stage = stages.get(stageNum);
+            view.displayMessage("\nResolving Stage " + (stageNum + 1));
 
-            // Draw cards for participants
-            for (Player participant : activeParticipants) {
-                AdventureCard drawnCard = game.drawAdventureCard();
-                participant.addCardToHand(drawnCard);
-                trimHandIfNeeded(participant);
+            // Handle withdrawals before stage resolution
+            Set<Player> stageParticipants = handleStageWithdrawals(activeParticipants, stageNum + 1);
+            if (stageParticipants.isEmpty()) {
+                view.displayMessage("No participants remain for this stage. Quest is over.");
+                break;
             }
 
-            // Resolve attacks
-            Set<Player> stageWinners = new HashSet<>();
-            for (Player participant : activeParticipants) {
-                Attack attack = buildAttack(participant);
-                if (attack.getValue() >= stage.getValue()) {
-                    stageWinners.add(participant);
-                }
-                discardAttackCards(participant, attack);
-            }
+            resolveStage(quest, stage, stageParticipants, activeParticipants);
+        }
+    }
 
-            activeParticipants = stageWinners;
-            if (i == stages.size() - 1) {
-                // Last stage - award shields
-                for (Player winner : activeParticipants) {
-                    winner.addShields(quest.getQuestCard().getStages());
-                    quest.addWinner(winner);
-                }
+    private void resolveStage(Quest quest, Stage stage, Set<Player> stageParticipants,
+                              Set<Player> activeParticipants) {
+        // Draw cards for participants
+        for (Player participant : stageParticipants) {
+            handleCardDrawAndDiscard(participant, 1);
+        }
+
+        // Resolve attacks
+        Set<Player> stageWinners = new HashSet<>();
+        for (Player participant : stageParticipants) {
+            Attack attack = buildAttack(participant);
+            if (attack.getValue() >= stage.getValue()) {
+                stageWinners.add(participant);
+            }
+            discardAttackCards(participant, attack);
+        }
+
+        // Update active participants
+        activeParticipants.clear();
+        activeParticipants.addAll(stageWinners);
+
+        // If this is the last stage, award shields and check for victory
+        if (stage == quest.getStages().get(quest.getStages().size() - 1)) {
+            awardShieldsAndCheckVictory(quest, stageWinners);
+        }
+    }
+
+    private void awardShieldsAndCheckVictory(Quest quest, Set<Player> winners) {
+        for (Player winner : winners) {
+            int shieldsAwarded = quest.getQuestCard().getStages();
+            winner.addShields(shieldsAwarded);
+            view.displayMessage(winner.getId() + " wins " + shieldsAwarded + " shields!");
+
+            // Immediate victory check after each shield award
+            if (winner.getShields() >= 7) {
+                game.setGameOver(true);
+                view.displayMessage(winner.getId() + " has won the game!");
+                announceWinners();
+                return;
+            }
+        }
+    }
+
+
+    private Set<Player> handleStageWithdrawals(Set<Player> activeParticipants, int stageNumber) {
+        Set<Player> stageParticipants = new HashSet<>();
+
+        for (Player participant : activeParticipants) {
+            view.clearScreen();
+            view.displayMessage("Stage " + stageNumber);
+            view.displayMessage("Player " + participant.getId() + "'s turn");
+            view.displayPlayerHand(participant);
+
+            if (!view.getYesNoChoice("Do you want to withdraw from the quest?")) {
+                stageParticipants.add(participant);
+            } else {
+                view.displayMessage("Player " + participant.getId() + " has withdrawn from the quest.");
             }
         }
 
-        // Cleanup after quest
-        cleanupQuest(quest);
+        return stageParticipants;
     }
 
     private void cleanupQuest(Quest quest) {
@@ -232,11 +276,27 @@ public class GameController {
         }
     }
 
+    private void handleCardDrawAndDiscard(Player player, int cardsToDraw) {
+        // Draw cards first
+        List<AdventureCard> drawnCards = new ArrayList<>();
+        for (int i = 0; i < cardsToDraw; i++) {
+            AdventureCard card = game.drawAdventureCard();
+            drawnCards.add(card);
+            player.addCardToHand(card);
+        }
+
+        // Then handle discarding if over limit
+        trimHandIfNeeded(player);
+    }
+
+
     private void trimHandIfNeeded(Player player) {
         while (player.getHand().size() > 12) {
+            view.clearScreen();
+            view.displayMessage("Player " + player.getId() + " must discard " +
+                    (player.getHand().size() - 12) + " cards");
             view.displayPlayerHand(player);
-            view.displayMessage("You must discard " +
-                    (player.getHand().size() - 12) + " cards.");
+
             int choice = view.getCardChoice(player);
             if (choice > 0 && choice <= player.getHand().size()) {
                 AdventureCard card = player.getHand().get(choice - 1);
@@ -247,10 +307,15 @@ public class GameController {
     }
 
     private void endTurn() {
-        view.displayMessage("End of turn");
+        view.displayMessage("Press Enter to leave the hot seat...");
         view.waitForKeyPress();
+        view.clearScreen();
         game.nextTurn();
+        Player nextPlayer = game.getCurrentPlayer();
+        view.displayMessage("Player " + nextPlayer.getId() + "'s turn!");
+        view.displayPlayerHand(nextPlayer);
     }
+
 
     private void announceWinners() {
         List<Player> winners = game.getWinners();

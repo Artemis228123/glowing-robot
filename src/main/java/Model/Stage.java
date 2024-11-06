@@ -13,23 +13,32 @@ public class Stage {
     }
 
     public boolean addCard(AdventureCard card) {
+        // Validate card type first
         if (card instanceof FoeCard) {
             if (foe != null) {
-                return false; // Only one foe allowed per stage
+                return false;
             }
-            foe = (FoeCard) card;
-        } else {
+        } else if (!(card instanceof WeaponCard)) {
+            return false;
+        }
+
+        // Check for duplicate weapons
+        if (card instanceof WeaponCard) {
             WeaponCard weaponCard = (WeaponCard) card;
             if (cards.stream()
                     .filter(c -> c instanceof WeaponCard)
                     .map(c -> (WeaponCard) c)
                     .anyMatch(w -> w.getType() == weaponCard.getType())) {
-                return false; // No duplicate weapon types allowed
+                return false;
             }
         }
 
+        // Add card and update value
         cards.add(card);
         value += card.getValue();
+        if (card instanceof FoeCard) {
+            foe = (FoeCard) card;
+        }
         return true;
     }
 

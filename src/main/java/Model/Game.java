@@ -113,6 +113,10 @@ public class Game {
         return gameOver;
     }
 
+    public void setGameOver(boolean gameOver) {
+        this.gameOver = gameOver;
+    }
+
     private void checkGameOver() {
         for (Player player : players) {
             if (player.getShields() >= 7) {
